@@ -174,6 +174,13 @@ CAP_SERVER_MANAGE = "server.manage"          # start/stop/build server processes
 CAP_PLUGINS_WRITE = "plugins.write"          # publish/unpublish plugins
 CAP_ADMINS_MANAGE = "admins.manage"          # manage panel accounts
 CAP_REPORTS_MANAGE = "reports.manage"        # review the moderation report queue
+# Deleting content is its own authority: it is irreversible and permanent, and it
+# used to be available to any signed-in account, including one that only exists
+# to issue verification badges.
+CAP_POSTS_MODERATE = "posts.moderate"        # delete posts and attachments
+# Wallet balances and the transaction history attached to them are financial
+# data; reading them used to require nothing beyond a login.
+CAP_USERS_FINANCE = "users.finance"          # read wallet balance and history
 
 # Account names are written by several paths (this panel, the Go service's
 # password registration, and OIDC provisioning) into one shared column. The
@@ -209,6 +216,8 @@ ALL_CAPABILITIES = (
     CAP_PLUGINS_WRITE,
     CAP_ADMINS_MANAGE,
     CAP_REPORTS_MANAGE,
+    CAP_POSTS_MODERATE,
+    CAP_USERS_FINANCE,
 )
 
 # Human-readable labels for the account-management UI.
@@ -224,6 +233,8 @@ CAPABILITY_LABELS = {
     CAP_PLUGINS_WRITE: "发布/下架插件",
     CAP_ADMINS_MANAGE: "管理面板账号",
     CAP_REPORTS_MANAGE: "审核举报",
+    CAP_POSTS_MODERATE: "删除帖子与附件",
+    CAP_USERS_FINANCE: "查看钱包余额与资金流水",
 }
 
 
@@ -277,6 +288,10 @@ def require_capability(cap):
                 abort(403)
             return view(*args, **kwargs)
 
+        # Recorded so a test can assert the gate exists; dropping the decorator
+        # from a route is silent otherwise, which is how these routes lost their
+        # authorization in the first place.
+        wrapped.required_capability = cap
         return wrapped
 
     return decorator
@@ -303,6 +318,18 @@ def inject_csrf():
         f'<input type="hidden" name="csrf_token" value="{_ensure_csrf_token()}">'
     )
     return {"csrf_input": csrf_field, "csrf_token": _ensure_csrf_token()}
+
+
+@app.context_processor
+def inject_capabilities():
+    """Expose the signed-in account's capabilities to templates.
+
+    Purely cosmetic: the route decorators decide access. Buttons that lead to a
+    403 make a correctly restricted panel look broken, so the templates hide the
+    ones the account cannot use.
+    """
+    caps = _current_admin_capabilities()
+    return {"has_cap": lambda cap: caps is not None and cap in caps}
 
 
 @app.template_filter("from_json")
@@ -1249,6 +1276,7 @@ def user_wallet(user_id):
 
 @app.route("/users/<int:user_id>/wallet/history")
 @login_required
+@require_capability(CAP_USERS_FINANCE)
 def user_wallet_history(user_id):
     user = db.fetch_one(
         "SELECT u.id, u.username, u.nickname, "
@@ -1465,6 +1493,7 @@ def user_punish(user_id):
 
 @app.route("/users/<int:user_id>/punishments")
 @login_required
+@require_capability(CAP_USERS_PUNISH)
 def user_punishment_history(user_id):
     user = db.fetch_one(
         "SELECT id, username, nickname, status, banned_until FROM users WHERE id = %s",
@@ -1506,6 +1535,7 @@ def user_punishment_history(user_id):
 
 @app.route("/admins")
 @login_required
+@require_capability(CAP_ADMINS_MANAGE)
 def admins():
     admins = db.fetch_all(
         "SELECT id, username, can_verify, capabilities, created_at, disabled, session_version "
@@ -1546,9 +1576,10 @@ def audit_log():
 @login_required
 @require_capability(CAP_ADMINS_MANAGE)
 def admin_capabilities(admin_id):
-    admin = db.fetch_one("SELECT id FROM admin_accounts WHERE id = %s", (admin_id,))
+    admin = db.fetch_one("SELECT id, capabilities FROM admin_accounts WHERE id = %s", (admin_id,))
     if not admin:
         abort(404)
+    before_caps = admin.get("capabilities") or ""
 
     selected = [c for c in request.form.getlist("capabilities") if c in ALL_CAPABILITIES]
     # Same checkbox convention as the verification toggle: a ticked box sends its
@@ -1574,6 +1605,15 @@ def admin_capabilities(admin_id):
     db.execute(
         "UPDATE admin_accounts SET can_verify = %s WHERE id = %s",
         (_cap_string_has(caps, CAP_USERS_VERIFY), admin_id),
+    )
+    # Every other account mutation records what changed; granting capabilities —
+    # the strongest edit in the panel, since it can hand out '*' — used to leave
+    # no trace at all.
+    _audit(
+        "admin.capabilities",
+        target_type="admin",
+        target_id=admin_id,
+        detail=json.dumps({"before": before_caps, "after": caps}, ensure_ascii=False),
     )
     flash("账号权限已更新。", "success")
     return redirect(url_for("admins"))
@@ -2047,11 +2087,18 @@ def posts():
 
 @app.route("/posts/<int:post_id>/delete", methods=["POST"])
 @login_required
+@require_capability(CAP_POSTS_MODERATE)
 def post_delete(post_id):
-    post = db.fetch_one("SELECT id FROM posts WHERE id = %s", (post_id,))
+    post = db.fetch_one("SELECT id, user_id FROM posts WHERE id = %s", (post_id,))
     if not post:
         abort(404)
     db.execute("DELETE FROM posts WHERE id = %s", (post_id,))
+    _audit(
+        "post.delete",
+        target_type="post",
+        target_id=post_id,
+        detail=json.dumps({"author_id": post.get("user_id")}, ensure_ascii=False),
+    )
     flash("Post deleted.", "success")
     return redirect(url_for("posts"))
 
@@ -2255,11 +2302,25 @@ def attachments():
 
 @app.route("/attachments/<int:attachment_id>/delete", methods=["POST"])
 @login_required
+@require_capability(CAP_POSTS_MODERATE)
 def attachment_delete(attachment_id):
-    att = db.fetch_one("SELECT id, object_key FROM attachments WHERE id = %s", (attachment_id,))
+    att = db.fetch_one(
+        "SELECT id, object_key, user_id FROM attachments WHERE id = %s", (attachment_id,)
+    )
     if not att:
         abort(404)
     db.execute("DELETE FROM attachments WHERE id = %s", (attachment_id,))
+    # The row is only half the object; recording the key is what lets an operator
+    # find the orphan in the bucket afterwards.
+    _audit(
+        "attachment.delete",
+        target_type="attachment",
+        target_id=attachment_id,
+        detail=json.dumps(
+            {"object_key": att.get("object_key") or "", "owner_id": att.get("user_id")},
+            ensure_ascii=False,
+        ),
+    )
     flash("Attachment deleted from database. Note: run rustfs cleanup for the object.", "success")
     return redirect(url_for("attachments"))
 

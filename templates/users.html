@@ -78,9 +78,11 @@
           <td class="text-muted text-nowrap">{{ u.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
           <td class="text-end text-nowrap">
             <div class="d-inline-flex gap-1 align-items-center">
+              {% if has_cap('users.punish') %}
               <a class="btn btn-sm btn-outline-warning" href="{{ url_for('user_punishment_history', user_id=u.id) }}" title="处罚 / 封禁">
                 <i class="bi bi-gavel"></i>
               </a>
+              {% endif %}
               <div class="dropdown">
                 <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="更多操作">
                   <i class="bi bi-three-dots-vertical"></i>
@@ -114,11 +116,13 @@
                       <span class="text-muted small">{{ (u.wallet_balance / 100) | round(2) }}</span>
                     </a>
                   </li>
+                  {% if has_cap('users.finance') %}
                   <li>
                     <a class="dropdown-item" href="{{ url_for('user_wallet_history', user_id=u.id) }}">
                       <i class="bi bi-receipt me-2 text-secondary"></i>钱包记录
                     </a>
                   </li>
+                  {% endif %}
                   <li>
                     <span class="dropdown-item-text small text-muted">
                       <i class="bi bi-star me-2"></i>Lv.{{ u.level }} · {{ u.exp or 0 }} 经验

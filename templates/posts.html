@@ -23,12 +23,14 @@
           </td>
           <td class="text-muted">{{ p.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
           <td class="text-end">
+            {% if has_cap('posts.moderate') %}
             <form method="post" action="{{ url_for('post_delete', post_id=p.id) }}" class="d-inline"
                   data-confirm="确认删除帖子 #{{ p.id }}?">{{ csrf_input }}
               <button class="btn btn-sm btn-outline-danger" type="submit" title="删除">
                 <i class="bi bi-trash"></i>
               </button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% else %}
