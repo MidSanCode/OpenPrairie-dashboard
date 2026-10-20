@@ -481,6 +481,18 @@ _login_attempts = {}  # key -> list of failed-attempt timestamps
 _LOGIN_WINDOW_SECONDS = 15 * 60
 _LOGIN_MAX_FAILURES = 5
 
+# Hard ceiling on the throttle table. Its keys are built from the submitted
+# username, which the caller controls and which had no length limit, so a few
+# oversized requests could each park a large key in a dict that only ever shrank
+# on a *successful* login. Bounded here instead of trusting the input size alone,
+# because the input bound could be raised without anyone noticing this table.
+_LOGIN_MAX_TRACKED_KEYS = 4096
+
+# Bound on the submitted fields. A real panel username is short, and bcrypt only
+# reads the first 72 bytes of a password anyway.
+_LOGIN_MAX_USERNAME_LENGTH = 64
+_LOGIN_MAX_PASSWORD_LENGTH = 256
+
 # A separate, looser per-source-address budget. Throttling only per
 # (address, username) would let an attacker stay under the limit by rotating
 # usernames, and throttling only per address is what made a proxy deployment
@@ -600,37 +612,55 @@ def _audit(action, target_type="", target_id="", detail=""):
         app.logger.error("failed to write audit entry for %s: %s", action, exc)
 
 
+def _login_stamps_locked(key, now):
+    """Failed attempts for [key] inside the window. Caller holds the lock."""
+    return [t for t in _login_attempts.get(key, []) if now - t < _LOGIN_WINDOW_SECONDS]
+
+
+def _login_prune_locked(now):
+    """Drop expired entries, then trim the oldest until the table fits.
+
+    Called only when the table exceeds its ceiling, so the common path stays a
+    single dict lookup. Must be called with the lock held.
+    """
+    for key in [
+        k for k, stamps in _login_attempts.items()
+        if not stamps or now - stamps[-1] >= _LOGIN_WINDOW_SECONDS
+    ]:
+        del _login_attempts[key]
+    while len(_login_attempts) > _LOGIN_MAX_TRACKED_KEYS:
+        # dicts keep insertion order, so this drops the oldest key.
+        _login_attempts.pop(next(iter(_login_attempts)), None)
+
+
 def _login_blocked(key):
+    # Read-only on a miss: the old version wrote an entry while merely checking,
+    # so even requests that were throttled grew the table.
     now = time.monotonic()
     with _login_attempts_lock:
-        stamps = [t for t in _login_attempts.get(key, []) if now - t < _LOGIN_WINDOW_SECONDS]
-        _login_attempts[key] = stamps
-        return len(stamps) >= _LOGIN_MAX_FAILURES
+        return len(_login_stamps_locked(key, now)) >= _LOGIN_MAX_FAILURES
 
 
 def _login_blocked_ip(ip):
     now = time.monotonic()
     with _login_attempts_lock:
         key = f"ip:{ip}"
-        stamps = [t for t in _login_attempts.get(key, []) if now - t < _LOGIN_WINDOW_SECONDS]
-        _login_attempts[key] = stamps
-        return len(stamps) >= _LOGIN_MAX_FAILURES_PER_IP
+        return len(_login_stamps_locked(key, now)) >= _LOGIN_MAX_FAILURES_PER_IP
 
 
 def _login_record_failure(key):
     now = time.monotonic()
     with _login_attempts_lock:
-        stamps = [t for t in _login_attempts.get(key, []) if now - t < _LOGIN_WINDOW_SECONDS]
+        stamps = _login_stamps_locked(key, now)
         stamps.append(now)
         _login_attempts[key] = stamps
-        if key.startswith("ip:"):
-            return
-        ip_key = "ip:" + key.split("|", 1)[0]
-        ip_stamps = [
-            t for t in _login_attempts.get(ip_key, []) if now - t < _LOGIN_WINDOW_SECONDS
-        ]
-        ip_stamps.append(now)
-        _login_attempts[ip_key] = ip_stamps
+        if not key.startswith("ip:"):
+            ip_key = "ip:" + key.split("|", 1)[0]
+            ip_stamps = _login_stamps_locked(ip_key, now)
+            ip_stamps.append(now)
+            _login_attempts[ip_key] = ip_stamps
+        if len(_login_attempts) > _LOGIN_MAX_TRACKED_KEYS:
+            _login_prune_locked(now)
 
 
 def _login_reset(key):
@@ -645,6 +675,15 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
+        # Both fields end up inside a throttle key or a bcrypt call, and neither
+        # used to be bounded: a few oversized requests were enough to park large
+        # keys in a table that never shrank.
+        if (
+            len(username) > _LOGIN_MAX_USERNAME_LENGTH
+            or len(password) > _LOGIN_MAX_PASSWORD_LENGTH
+        ):
+            flash("用户名或密码无效。", "error")
+            return render_template("login.html"), 400
         # Throttle online password guessing. The key must combine BOTH the
         # source address and the submitted username: `request.remote_addr or
         # "?" + "|" + username.lower()` was parsed as
