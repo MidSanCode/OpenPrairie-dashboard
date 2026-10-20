@@ -7,6 +7,17 @@ DB_PASSWORD = os.getenv("ADMIN_DB_PASSWORD", "")
 DB_NAME = os.getenv("ADMIN_DB_NAME", "openfield")
 DB_SSLMODE = os.getenv("ADMIN_DB_SSLMODE", "")
 
+# Optional dedicated role for database restores.
+#
+# A restore replays arbitrary SQL, so running it as the panel's own role made an
+# uploaded dump a privilege-escalation primitive: that role owns the identity
+# tables. With this configured, restores run as a role that has the data
+# privileges it needs and no access to the panel's account tables — so even a
+# screening bypass cannot mint or take over an administrator. Empty means "reuse
+# ADMIN_DB_USER", which keeps existing deployments working unchanged.
+DB_RESTORE_USER = os.getenv("ADMIN_DB_RESTORE_USER", "")
+DB_RESTORE_PASSWORD = os.getenv("ADMIN_DB_RESTORE_PASSWORD", "")
+
 RUSTFS_ENDPOINT = os.getenv("RUSTFS_ENDPOINT", "localhost:9000")
 RUSTFS_ACCESS_KEY = os.getenv("RUSTFS_ACCESS_KEY", "")
 RUSTFS_SECRET_KEY = os.getenv("RUSTFS_SECRET_KEY", "")

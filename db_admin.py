@@ -37,14 +37,15 @@ def _restrict_file(path):
 # Largest backup file we will read or import.
 MAX_IMPORT_BYTES = 512 * 1024 * 1024
 
-# Identity tables. The restore runs as the same database role that owns these
-# tables, so a dump containing them is a universal privilege-escalation
-# primitive: `UPDATE admin_accounts SET can_verify = TRUE` re-grants an
-# account the very permission the panel just revoked, and an INSERT there
-# mints a brand-new panel administrator. A legitimate data restore has no
-# reason to rewrite the panel's own identity rows, so files referencing these
-# tables are refused outright. This holds even if the psql meta-command screen
-# is bypassed, because it works on the SQL text, not on client syntax.
+# Identity tables. The restore runs as a database role that owns these tables
+# (unless ADMIN_DB_RESTORE_USER points at a restricted one), so a dump
+# containing them is a universal privilege-escalation primitive: `UPDATE
+# admin_accounts SET can_verify = TRUE` re-grants an account the very permission
+# the panel just revoked, and an INSERT there mints a brand-new panel
+# administrator. A legitimate data restore has no reason to rewrite the panel's
+# own identity rows, so files referencing these tables are refused outright.
+# This holds even if the psql meta-command screen is bypassed, because it works
+# on the SQL text, not on client syntax.
 _PROTECTED_TABLES = (
     "admin_accounts",
     "pg_authid",
@@ -57,26 +58,91 @@ _PROTECTED_TABLES = (
 # after CREATE/ALTER/DROP TABLE, INSERT INTO, UPDATE, DELETE FROM, TRUNCATE,
 # or COPY ... FROM/TO. A plain substring search would reject an unrelated
 # column or comment mentioning the name.
+# A schema qualifier, quoted or not: `public.`, `"public".`, `"my schema".`
+# The old pattern only accepted `\w+.` or a quoted table name, so
+# `UPDATE "public"."admin_accounts"` slipped through — and because the import
+# runs as the table owner, that statement could reset a super administrator's
+# password hash or mint a new one.
+_SCHEMA_QUALIFIER = r'(?:(?:"[^"]*"|[\w$]+)\s*\.\s*)?'
+
+# A protected table name, quoted or not. The bare form stops at a word
+# boundary, so `admin_accounts_log` does not match; the quoted form cannot be
+# extended at all, which is what makes `"public"."admin_accounts"` match.
+_PROTECTED_NAME = (
+    r'(?:"(?:' + "|".join(_PROTECTED_TABLES) + r')"'
+    r'|(?:' + "|".join(_PROTECTED_TABLES) + r')\b)'
+)
+
+# A reference that no legitimate data dump produces: the table is qualified, so
+# it is being named explicitly rather than appearing in free text.
+_QUALIFIED_PROTECTED_RE = re.compile(
+    r'[\w$"]+\s*\.\s*' + _PROTECTED_NAME, re.IGNORECASE
+)
+
+# Positions that deliberately name a table: a statement keyword, `ON` (which
+# covers CREATE INDEX ... ON, GRANT ... ON and DROP POLICY ... ON), or the DDL
+# verb list. Comments are stripped before this runs, so
+# `INSERT INTO /*c*/ admin_accounts` no longer hides the reference.
 _PROTECTED_TABLE_RE = re.compile(
-    r"\b(?:create|alter|drop)\s+(?:table|index|sequence)\s+"
-    r"(?:if\s+(?:not\s+)?exists\s+)?(?:\w+\.)?\"?(" + "|".join(_PROTECTED_TABLES) + r")\"?\b"
-    r"|\btruncate\s+(?:table\s+)?(?:only\s+)?(?:\w+\.)?\"?("
-    + "|".join(_PROTECTED_TABLES)
-    + r")\"?\b"
-    r"|\b(?:insert\s+into|delete\s+from|update|copy)\s+(?:\w+\.)?\"?("
-    + "|".join(_PROTECTED_TABLES)
-    + r")\"?\b",
+    r"\b(?:create|alter|drop)\s+"
+    r"(?:table|index|sequence|view|trigger|policy|rule|function|procedure)\s+"
+    r"(?:if\s+(?:not\s+)?exists\s+)?(?:only\s+)?(?:on\s+)?"
+    r"(?:" + _SCHEMA_QUALIFIER + _PROTECTED_NAME + r")"
+    r"|\b(?:insert\s+into|delete\s+from|update|copy|truncate|lock|analyze|vacuum|reindex)\s+"
+    r"(?:table\s+)?(?:only\s+)?"
+    r"(?:" + _SCHEMA_QUALIFIER + _PROTECTED_NAME + r")"
+    r"|\bon\s+(?:" + _SCHEMA_QUALIFIER + _PROTECTED_NAME + r")",
     re.IGNORECASE,
 )
 
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_LINE_COMMENT_RE = re.compile(r"--[^\n]*")
+
+# `COPY ... FROM stdin` starts a data block whose lines are payload, not SQL.
+_COPY_FROM_STDIN_RE = re.compile(
+    r"^\s*copy\b.*\bfrom\s+stdin\b", re.IGNORECASE | re.DOTALL
+)
+
+_NAME_IN_TEXT_RE = re.compile(
+    "|".join(_PROTECTED_TABLES), re.IGNORECASE
+)
+
+
+def _strip_comments(sql_text):
+    """Remove SQL comments so they cannot split a keyword from its table name."""
+    return _LINE_COMMENT_RE.sub(" ", _BLOCK_COMMENT_RE.sub(" ", sql_text))
+
+
+def _strip_copy_data(sql_text):
+    """Drop COPY data payloads: those lines are values, never statements."""
+    kept = []
+    in_copy_data = False
+    for line in sql_text.splitlines():
+        if in_copy_data:
+            if line.strip() == "\\.":
+                in_copy_data = False
+            continue
+        kept.append(line)
+        if _COPY_FROM_STDIN_RE.match(line):
+            in_copy_data = True
+    return "\n".join(kept)
+
 
 def references_protected_table(sql_text):
-    """Return the identity table a dump touches, or None when it is safe."""
-    for m in _PROTECTED_TABLE_RE.finditer(sql_text):
-        for group in m.groups():
-            if group:
-                return group.lower()
-    return None
+    """Return the identity table a dump touches, or None when it is safe.
+
+    This screens the dump's *statements*: comments and COPY payloads are removed
+    first, so a mention of one of these names inside a post body or a comment is
+    not mistaken for a write.
+    """
+    scanned = _strip_copy_data(_strip_comments(sql_text))
+    match = _PROTECTED_TABLE_RE.search(scanned) or _QUALIFIED_PROTECTED_RE.search(
+        scanned
+    )
+    if match is None:
+        return None
+    name = _NAME_IN_TEXT_RE.search(match.group(0))
+    return name.group(0).strip('"').lower() if name else "protected identity table"
 
 # psql reads its input the same way it reads an interactive session, so a file
 # containing backslash meta-commands executes them: `\!` runs a shell command,
@@ -102,40 +168,78 @@ _PROGRAM_RE = re.compile(r"\bPROGRAM\b", re.IGNORECASE)
 def contains_meta_command(sql_text):
     """Return a description of the first dangerous construct in sql_text.
 
-    Returns None when the text is safe to feed to psql. Two constructs are
-    intentionally tolerated because ordinary pg_dump output depends on them:
-    the `\\.` COPY-data terminator and a trailing lone backslash. Everything
-    else that begins with a backslash must be an allowlisted client command.
+    Returns None when the text is safe to feed to psql.
+
+    The previous version only inspected lines that *started* with a backslash,
+    which is not how psql reads a script: a meta-command is recognised at the
+    start of a statement, so `SELECT 1; \\! id` ran a shell command that the
+    screen never looked at. Since the file is passed to `psql -f`, that was
+    command execution on the panel host. `--single-transaction` and
+    `ON_ERROR_STOP` only constrain the server-side transaction; they do not
+    affect the client's parsing.
+
+    The screen is now: inside a COPY payload, backslashes are data; everywhere
+    else a backslash is only acceptable as the first character of an allowlisted
+    client command. Deliberate trade-off: a bare backslash inside an ordinary SQL
+    string literal is also refused. The panel's own exports come from pg_dump and
+    never contain one, and refusing is the safe direction.
     """
+    in_copy_data = False
     for raw_line in sql_text.splitlines():
         line = raw_line.strip()
-        if not line.startswith("\\"):
+        if in_copy_data:
+            # The terminator is the only structural line in a data block; every
+            # other line is a value and may contain anything, backslashes
+            # included.
+            if line == "\\.":
+                in_copy_data = False
             continue
-        # The COPY data terminator is data, not a meta-command, and every
-        # pg_dump script that copies rows contains it.
-        if line == "\\.":
+        if not line:
             continue
-        match = _META_RE.match(line)
-        cmd = (match.group(1) if match and match.group(1) else "").lower()
-        if not cmd:
-            # A bare backslash splices the following line onto this one, so
-            # psql would interpret the next line's text in this context.
-            # Rather than guess at the result, reject it.
-            return "\\ (line continuation)"
-        if cmd not in _ALLOWED_META:
-            return "\\" + cmd
 
-    # Shelling out via COPY, which has an otherwise benign verb.
-    for raw_line in sql_text.splitlines():
-        if _PROGRAM_RE.search(raw_line) and (
-            "\\copy" in raw_line.lower() or raw_line.strip().lower().startswith("copy ")
-        ):
+        if line.startswith("\\"):
+            if line == "\\.":
+                continue
+            match = _META_RE.match(line)
+            cmd = (match.group(1) if match and match.group(1) else "").lower()
+            if not cmd:
+                # A bare backslash splices the next line onto this one, so psql
+                # would read that line's text in this context. Rather than guess
+                # at the result, reject it.
+                return "\\ (line continuation)"
+            if cmd not in _ALLOWED_META:
+                return "\\" + cmd
+            continue
+
+        # Any backslash outside a COPY payload can begin a meta-command once psql
+        # reaches a statement boundary.
+        if "\\" in line:
+            return "inline backslash"
+
+        if _PROGRAM_RE.search(line) and re.search(r"\bcopy\b", line, re.IGNORECASE):
             return "COPY ... PROGRAM"
+
+        if _COPY_FROM_STDIN_RE.match(line):
+            in_copy_data = True
 
     return None
 
 
-def _pg_env():
+def _restore_credentials():
+    """Role and password used for imports, preferring a dedicated one.
+
+    A restore replays uploaded SQL. When ADMIN_DB_RESTORE_USER is configured the
+    import runs as a role without access to the panel's identity tables or to
+    server-side program execution, so a screening bypass no longer escalates to
+    taking over an administrator. Falls back to the panel's own role, which is
+    what every deployment had before this knob existed.
+    """
+    user = getattr(config, "DB_RESTORE_USER", "") or config.DB_USER
+    password = getattr(config, "DB_RESTORE_PASSWORD", "") or config.DB_PASSWORD
+    return user, password
+
+
+def _pg_env(password=None):
     # Hand the child a minimal environment instead of inheriting the panel's.
     #
     # dict(os.environ) gave every psql invocation the panel's ADMIN_SECRET_KEY —
@@ -158,16 +262,16 @@ def _pg_env():
         )
         if key in os.environ
     }
-    env["PGPASSWORD"] = config.DB_PASSWORD
+    env["PGPASSWORD"] = password if password is not None else config.DB_PASSWORD
     env["PGCLIENTENCODING"] = "UTF8"
     return env
 
 
-def _common_args():
+def _common_args(user=None):
     return [
         "-h", config.DB_HOST,
         "-p", str(config.DB_PORT),
-        "-U", config.DB_USER,
+        "-U", user or config.DB_USER,
         "-d", config.DB_NAME,
     ]
 
@@ -419,6 +523,7 @@ def import_backup(sql_path):
     if bad is not None:
         return False, bad
 
+    restore_user, restore_password = _restore_credentials()
     cmd = [
         "psql",
         # Do not read ~/.psqlrc: a startup file there would otherwise be
@@ -426,12 +531,16 @@ def import_backup(sql_path):
         "-X",
         "--set", "ON_ERROR_STOP=1",
         "--single-transaction",
-        *_common_args(),
+        *_common_args(restore_user),
         "-f", sql_path,
     ]
     try:
         result = subprocess.run(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_pg_env(), timeout=1800
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=_pg_env(restore_password),
+            timeout=1800,
         )
     except FileNotFoundError:
         return False, "未找到 psql 命令，请确认 PostgreSQL 客户端已安装并加入 PATH"
