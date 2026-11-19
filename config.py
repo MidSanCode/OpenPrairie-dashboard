@@ -4,7 +4,7 @@ DB_HOST = os.getenv("ADMIN_DB_HOST", "localhost")
 DB_PORT = int(os.getenv("ADMIN_DB_PORT", "5432"))
 DB_USER = os.getenv("ADMIN_DB_USER", "")
 DB_PASSWORD = os.getenv("ADMIN_DB_PASSWORD", "")
-DB_NAME = os.getenv("ADMIN_DB_NAME", "openfield")
+DB_NAME = os.getenv("ADMIN_DB_NAME", "openprairie")
 DB_SSLMODE = os.getenv("ADMIN_DB_SSLMODE", "")
 
 # Optional dedicated role for database restores.
@@ -21,7 +21,7 @@ DB_RESTORE_PASSWORD = os.getenv("ADMIN_DB_RESTORE_PASSWORD", "")
 RUSTFS_ENDPOINT = os.getenv("RUSTFS_ENDPOINT", "localhost:9000")
 RUSTFS_ACCESS_KEY = os.getenv("RUSTFS_ACCESS_KEY", "")
 RUSTFS_SECRET_KEY = os.getenv("RUSTFS_SECRET_KEY", "")
-RUSTFS_BUCKET = os.getenv("RUSTFS_BUCKET", "openfield")
+RUSTFS_BUCKET = os.getenv("RUSTFS_BUCKET", "openprairie")
 
 # Credentials deliberately have no built-in defaults.
 #
@@ -59,7 +59,7 @@ def missing_credentials():
 
 # Flask session signing key.
 #
-# A predictable key lets anyone forge the "openfield_admin" session cookie and
+# A predictable key lets anyone forge the "openprairie_admin" session cookie and
 # walk straight past the login form, so there is deliberately no insecure
 # default. Resolution order:
 #   1. ADMIN_SECRET_KEY environment variable;
@@ -156,7 +156,7 @@ def _load_or_create_secret_key():
 
 SECRET_KEY = _load_or_create_secret_key()
 
-# OpenField Go server repository root used by the server manager.
+# OpenPrairie Go server repository root used by the server manager.
 # Override with ADMIN_SERVER_ROOT; defaults to the sibling "server" folder
 # next to this admin repository.
 SERVER_ROOT = os.getenv("ADMIN_SERVER_ROOT", "").strip()
@@ -165,7 +165,7 @@ if not SERVER_ROOT:
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server"
     )
 
-SESSION_COOKIE_NAME = "openfield_admin"
+SESSION_COOKIE_NAME = "openprairie_admin"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 # SameSite=Lax stops cross-site POSTs from carrying the cookie (the classic

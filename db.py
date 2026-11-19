@@ -227,7 +227,7 @@ def init_admin_table():
                 "ALTER TABLE user_punishments ADD COLUMN IF NOT EXISTS "
                 "operator_username VARCHAR(255) NOT NULL DEFAULT ''"
             )
-        # User-verification columns only make sense once the OpenField schema (and
+        # User-verification columns only make sense once the OpenPrairie schema (and
         # the users table) exists; on a brand-new database this runs after the Go
         # server migrations have initialized the schema.
         if not is_initialized():
@@ -259,7 +259,7 @@ def init_admin_table():
 
 
 def is_initialized():
-    """True when the OpenField schema exists (the users table is present)."""
+    """True when the OpenPrairie schema exists (the users table is present)."""
     try:
         row = fetch_one("SELECT to_regclass('public.users') AS t")
         return bool(row and row["t"])

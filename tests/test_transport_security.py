@@ -77,7 +77,7 @@ def test_import_dump_is_created_private_and_removed(admin_client, tmp_path):
     import glob
     import tempfile
 
-    before = set(glob.glob(os.path.join(tempfile.gettempdir(), "openfield-import-*")))
+    before = set(glob.glob(os.path.join(tempfile.gettempdir(), "openprairie-import-*")))
 
     token = _csrf(admin_client)
     resp = admin_client.post(
@@ -92,7 +92,7 @@ def test_import_dump_is_created_private_and_removed(admin_client, tmp_path):
     )
     assert resp.status_code in (302, 200)
 
-    after = set(glob.glob(os.path.join(tempfile.gettempdir(), "openfield-import-*")))
+    after = set(glob.glob(os.path.join(tempfile.gettempdir(), "openprairie-import-*")))
     leftovers = after - before
     assert not leftovers, f"the import dump was left behind: {leftovers}"
 
@@ -190,7 +190,7 @@ def test_cookie_attributes_are_set():
 
     assert app.app.config["SESSION_COOKIE_HTTPONLY"] is True, "cookie readable by script"
     assert app.app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
-    assert app.app.config["SESSION_COOKIE_NAME"] == "openfield_admin"
+    assert app.app.config["SESSION_COOKIE_NAME"] == "openprairie_admin"
 
 
 def test_hsts_is_sent_when_forwarded_https(admin_client):

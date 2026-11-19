@@ -331,7 +331,7 @@ def _sanitize_error(text):
         text,
         flags=re.IGNORECASE,
     )
-    # A bare hostname or IP left anywhere else, e.g. "database \u0022openfield\u0022 on host db.internal".
+    # A bare hostname or IP left anywhere else, e.g. "database \u0022openprairie\u0022 on host db.internal".
     text = re.sub(
         r"\b((?:\d{1,3}\.){3}\d{1,3})\b", "<host>", text
     )
@@ -420,7 +420,7 @@ def export_backup():
 
     bdir = backup_dir()
     ts = time.strftime("%Y%m%d-%H%M%S")
-    out_path = os.path.join(bdir, f"openfield-{ts}.sql")
+    out_path = os.path.join(bdir, f"openprairie-{ts}.sql")
 
     cmd = [
         "pg_dump",

@@ -1,5 +1,5 @@
 @echo off
-REM OpenField Admin Panel - Windows launcher
+REM OpenPrairie Admin Panel - Windows launcher
 cd /d "%~dp0.."
 
 REM Install only when the environment is missing, and never silently upgrade.

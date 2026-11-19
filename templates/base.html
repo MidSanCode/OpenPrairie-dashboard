@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}OpenField Admin{% endblock %}</title>
+  <title>{% block title %}OpenPrairie Admin{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='icons/bootstrap-icons.css') }}">
   <style>
@@ -52,7 +52,7 @@
   {% if session.admin_id %}
   <aside id="sidebarNav" class="sidebar collapse d-lg-flex flex-column p-3 text-white">
     <a class="brand mb-3 d-flex align-items-center gap-2" href="{{ url_for('dashboard') }}">
-      <i class="bi bi-boxes"></i><span>OpenField Admin</span>
+      <i class="bi bi-boxes"></i><span>OpenPrairie Admin</span>
     </a>
     <ul class="nav nav-pills flex-column gap-1 mb-auto">
       <li class="nav-item">

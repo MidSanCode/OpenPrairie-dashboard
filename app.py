@@ -379,7 +379,7 @@ def csrf_protect():
 # ---------- initialization ----------
 
 def initialize_database():
-    """Ensure the OpenField schema exists by running the Go server migrations.
+    """Ensure the OpenPrairie schema exists by running the Go server migrations.
 
     Only ever invoked from the database management panel. Re-running is safe
     (the server migrations use CREATE TABLE IF NOT EXISTS), so this can also
@@ -848,12 +848,12 @@ def db_import():
     # user could read it for the whole import window. Restrict the directory
     # rather than just the file: a world-readable directory lets a local attacker
     # merely LIST what is there and race the filename, while 0700 removes both.
-    tmp_dir = tempfile.mkdtemp(prefix="openfield-import-")
+    tmp_dir = tempfile.mkdtemp(prefix="openprairie-import-")
     try:
         os.chmod(tmp_dir, 0o700)
     except OSError:
         pass
-    tmp_path = os.path.join(tmp_dir, f"openfield-import-{uuid.uuid4().hex}.sql")
+    tmp_path = os.path.join(tmp_dir, f"openprairie-import-{uuid.uuid4().hex}.sql")
     try:
         # Create the file 0600 BEFORE writing content into it, so there is no
         # window in which it exists with wider permissions.
@@ -940,9 +940,9 @@ def server_config():
         return redirect(url_for("server_page"))
 
     # server_root decides which binaries the panel later executes
-    # (<root>/bin/openfield-*) and where `go build` runs, so an unchecked
+    # (<root>/bin/openprairie-*) and where `go build` runs, so an unchecked
     # value is a direct path from a panel account to running an arbitrary
-    # program: point it at any directory containing bin/openfield-gateway and
+    # program: point it at any directory containing bin/openprairie-gateway and
     # press start. Confine it to the configured base directory instead.
     ok, result = server_manager.validate_server_root(new_root)
     if not ok:

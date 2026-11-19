@@ -1,6 +1,6 @@
-# OpenField Admin Panel
+# OpenPrairie Admin Panel
 
-基于 Python + Flask 的管理面板,直连 OpenField 服务端共享的 PostgreSQL 数据库,
+基于 Python + Flask 的管理面板,直连 OpenPrairie 服务端共享的 PostgreSQL 数据库,
 用于管理用户、角色、帖子与附件。
 
 ## 功能
@@ -41,7 +41,7 @@ Windows 可直接运行 `scripts/start.bat`,Linux/macOS 运行 `scripts/start.sh
 | `ADMIN_DB_PORT` | `5432` | PostgreSQL 端口 |
 | `ADMIN_DB_USER` | *(必填)* | 数据库用户 |
 | `ADMIN_DB_PASSWORD` | *(必填)* | 数据库密码 |
-| `ADMIN_DB_NAME` | `openfield` | 数据库名 |
+| `ADMIN_DB_NAME` | `openprairie` | 数据库名 |
 | `ADMIN_DB_SSLMODE` | *(留空)* | 留空时使用 libpq 默认值 `prefer`(优先 TLS)。生产环境请显式设为 `require` 或 `verify-full` |
 | `RUSTFS_ENDPOINT` | `localhost:9000` | 对象存储地址;留空则禁用对象存储功能 |
 | `RUSTFS_ACCESS_KEY` | *(设置了 ENDPOINT 时必填)* | 对象存储 Access Key |
@@ -53,7 +53,7 @@ Windows 可直接运行 `scripts/start.bat`,Linux/macOS 运行 `scripts/start.sh
 ### 关于 `ADMIN_SECRET_KEY`
 
 **不要把它设成一个固定字符串。** 会话签名密钥一旦被他人得知,任何人都可以伪造
-`openfield_admin` 会话 cookie,完全绕过登录。
+`openprairie_admin` 会话 cookie,完全绕过登录。
 
 留空即可:面板会在首次启动时生成一个随机密钥并以 `0600` 权限写入同目录的
 `.secret_key`(已在 `.gitignore` 中)。只有在你希望由外部密钥管理系统统一提供

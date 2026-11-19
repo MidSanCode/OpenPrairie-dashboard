@@ -181,7 +181,7 @@ with warnings.catch_warnings(record=True) as caught:
             ["var/lib/postgresql"],
         ),
         (
-            "postgresql://of-user:supersecret@db.internal:5432/openfield",
+            "postgresql://of-user:supersecret@db.internal:5432/openprairie",
             ["supersecret", "db.internal"],
         ),
         (

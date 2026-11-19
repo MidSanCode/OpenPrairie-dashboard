@@ -1,4 +1,4 @@
-"""Manage the Go OpenField server processes from the admin panel.
+"""Manage the Go OpenPrairie server processes from the admin panel.
 
 Processes are started detached from the Flask process and tracked by PID in a
 JSON config file, so running services survive a Flask restart and their status
@@ -23,13 +23,13 @@ def _exe_suffix():
 # Service name -> built executable base name (suffix added at runtime) +
 # source directory.
 SERVICES = {
-    "gateway": {"exe": "openfield-gateway", "dir": "gateway"},
-    "account": {"exe": "openfield-account", "dir": "account"},
-    "storage": {"exe": "openfield-storage", "dir": "storage"},
-    "chat": {"exe": "openfield-chat", "dir": "chat"},
-    "posts": {"exe": "openfield-posts", "dir": "posts"},
-    "push": {"exe": "openfield-push", "dir": "push"},
-    "plugin": {"exe": "openfield-plugin", "dir": "plugin"},
+    "gateway": {"exe": "openprairie-gateway", "dir": "gateway"},
+    "account": {"exe": "openprairie-account", "dir": "account"},
+    "storage": {"exe": "openprairie-storage", "dir": "storage"},
+    "chat": {"exe": "openprairie-chat", "dir": "chat"},
+    "posts": {"exe": "openprairie-posts", "dir": "posts"},
+    "push": {"exe": "openprairie-push", "dir": "push"},
+    "plugin": {"exe": "openprairie-plugin", "dir": "plugin"},
 }
 
 # Keep references to open log files so they aren't garbage collected.
@@ -84,7 +84,7 @@ def validate_server_root(new_root):
     """Validate an operator-supplied server_root.
 
     The value selects which directory the panel executes binaries from
-    (<root>/bin/openfield-<service>) and where `go build` runs, so it must be
+    (<root>/bin/openprairie-<service>) and where `go build` runs, so it must be
     confined to a directory the panel already trusts. Returns (True, realpath)
     on success and (False, reason) on rejection.
 

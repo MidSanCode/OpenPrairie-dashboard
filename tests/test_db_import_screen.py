@@ -129,10 +129,10 @@ def test_restore_credentials_fall_back_to_panel_role(monkeypatch):
 
 
 def test_restore_credentials_prefer_dedicated_role(monkeypatch):
-    monkeypatch.setattr(db_admin.config, "DB_RESTORE_USER", "openfield_restore")
+    monkeypatch.setattr(db_admin.config, "DB_RESTORE_USER", "openprairie_restore")
     monkeypatch.setattr(db_admin.config, "DB_RESTORE_PASSWORD", "s3cret")
     user, password = db_admin._restore_credentials()
-    assert user == "openfield_restore"
+    assert user == "openprairie_restore"
     assert password == "s3cret"
-    assert db_admin._common_args(user)[5] == "openfield_restore"
+    assert db_admin._common_args(user)[5] == "openprairie_restore"
     assert db_admin._pg_env(password)["PGPASSWORD"] == "s3cret"

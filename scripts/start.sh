@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OpenField Admin Panel - Linux/macOS launcher
+# OpenPrairie Admin Panel - Linux/macOS launcher
 set -e
 cd "$(dirname "$0")/.."
 
